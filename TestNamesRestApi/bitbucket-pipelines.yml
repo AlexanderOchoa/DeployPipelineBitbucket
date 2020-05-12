@@ -1,0 +1,85 @@
+#los valores que se encuentran dentro de <> deben ser reemplazados, al ser reemplazados se debe eliminar los <>, 
+#de ser muy amplia la cadena considerar el uso de variables de bitbucket
+#considerar que las variables sin comillas ("") son propias de bitbucket y las con comillas son creadas por nosotros dentro de bitbucket
+options:
+  docker: true
+
+pipelines:
+  default:
+    - step:
+        caches:
+        - maven
+        image: maven:3.3.9
+        script:
+        #obtener el ambiente de despliegue a través del comentario del commit, este debe contener [ambiente_<development-qc>]
+        - COMMIT_MESSAGE=`git log --format=%B -n 1 $BITBUCKET_COMMIT`
+        - if [[ $COMMIT_MESSAGE =~ "[ambiente_development]" ]];
+            then AMBIENTE="development";
+          elif [[ $COMMIT_MESSAGE =~ "[ambiente_qc]" ]];
+            then AMBIENTE="$qc";
+          else
+            AMBIENTE="development";
+          fi
+        - echo $AMBIENTE
+        #generar el compilado segun el ambiente
+        - mvn -B clean install -P $AMBIENTE
+        #generar la imagen, teniendo como version el numero de compilado del bitbucket
+        - docker build -t gcr.io/<project-id>/<image-name>:$BITBUCKET_BUILD_NUMBER .
+        #autenticar contra el contenedor de imagenes de gcloud
+        - docker login -u _json_key -p <service-account> https://gcr.io
+        #subir la imagen generada al contenedor de imágenes de gcloud
+        - docker push gcr.io/<project-id>/<image-name>:$BITBUCKET_BUILD_NUMBER
+    - step:
+        image: google/cloud-sdk:279.0.0
+        script:
+        #obtener el cluster de despliegue a traves del comentario del commit, este debe contener [ambiente_<development-qc>]
+        - COMMIT_MESSAGE=`git log --format=%B -n 1 $BITBUCKET_COMMIT`
+        - if [[ $COMMIT_MESSAGE =~ "[ambiente_development]" ]];
+            then CLUSTER="my-cluster-development";
+          elif [[ $COMMIT_MESSAGE =~ "[ambiente_qc]" ]];
+            then CLUSTER="my-cluster-qc";
+          else
+            CLUSTER="my-cluster-development";
+          fi
+        - echo $CLUSTER
+        #autenticar contra gcloud, mediante el archivo KEY-AUTH.json
+        - gcloud auth activate-service-account --key-file KEY-AUTH.json
+        #situar el cluster
+        - gcloud container clusters get-credentials $CLUSTER --zone us-central1-a --project <project-id>
+        #colocar como version de la imagen el numero de compilado, esto sobre el archivo ARCHIVO-DEPLOY.yml
+        - sed -i s/versionImagen/$BITBUCKET_BUILD_NUMBER/g ARCHIVO-DEPLOY.yml
+        #mensaje por defecto deployment eliminado
+        - MENSAJE_ELIMINAR="deployment eliminado"
+        #validar eliminar deployment, para eliminar debe contener [-d]
+        - if [[ $COMMIT_MESSAGE =~ "[-d]" ]];
+            then kubectl delete deployments/<deployment-name>;
+          else
+            MENSAJE_ELIMINAR="deployment no eliminado";
+          fi
+        - echo $MENSAJE_ELIMINAR
+        #deployar la nueva imagen mediante el archivo ARCHIVO-DEPLOY.yml
+        - kubectl apply -f ARCHIVO-DEPLOY.yml
+        #eliminar la imagen con la posición tres antes de la actual de forma asícrona
+        #- gcloud container images delete gcr.io/<project-id>/<image-name>:$(($BITBUCKET_BUILD_NUMBER-3)) --force-delete-tags --quiet
+  tags:
+    '*':
+    - step:
+        caches:
+        - maven
+        image: maven:3.3.9
+        script:
+        - echo $BITBUCKET_TAG
+        #generar el compilado para un ambiente por defecto, en este caso development,
+        #este valor posteriormente sera cambiado mediante el archivo yml
+        - mvn -B clean install -P <development>
+        #generar la imagen teniendo como version el nombre del tag
+        - docker build -t gcr.io/<project-id>/<image-name>:$BITBUCKET_TAG .
+        #autenticar contra el contenedor de imagenes de gcloud
+        - docker login -u _json_key -p <sevice-account> https://gcr.io
+        #subir la imagen con el nombre del tag al contenedor de imagenes de gcloud
+        - docker push gcr.io/<project-id>/<image-name>:$BITBUCKET_TAG
+
+#manejo de cache para el uso de dependencias (.m2)
+definitions:
+  caches:
+    maven: /root/.m2/repository
