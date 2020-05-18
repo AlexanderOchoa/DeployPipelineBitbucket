@@ -1,6 +1,6 @@
 # Deploy Pipelines Bitbucket
 
-This repository contains the project with the structure of a automatic deploy in Google Cloud Platform with spring project.
+This repository contains the project with the structure of automatic deploy in Google Cloud Platform with a spring project.
 
 We need 4 files:
 
