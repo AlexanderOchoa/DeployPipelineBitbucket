@@ -1,4 +1,4 @@
-#los valores que se encuentran dentro de <> deben ser reemplazados, al ser reemplazados se debe eliminar los <>, 
+﻿#los valores que se encuentran dentro de <> deben ser reemplazados, al ser reemplazados se debe eliminar los <>, 
 #de ser muy amplia la cadena considerar el uso de variables de bitbucket
 #considerar que las variables sin comillas ("") son propias de bitbucket y las con comillas son creadas por nosotros dentro de bitbucket
 options:
@@ -11,14 +11,14 @@ pipelines:
         - maven
         image: maven:3.3.9
         script:
-        #obtener el ambiente de despliegue a través del comentario del commit, este debe contener [ambiente_<development-qc>]
+        #obtener el ambiente de despliegue a través del comentario del commit, este debe contener [ambiente_<dev-qc>]
         - COMMIT_MESSAGE=`git log --format=%B -n 1 $BITBUCKET_COMMIT`
-        - if [[ $COMMIT_MESSAGE =~ "[ambiente_development]" ]];
-            then AMBIENTE="development";
+        - if [[ $COMMIT_MESSAGE =~ "[ambiente_dev]" ]];
+            then AMBIENTE="dev";
           elif [[ $COMMIT_MESSAGE =~ "[ambiente_qc]" ]];
-            then AMBIENTE="$qc";
+            then AMBIENTE="qc";
           else
-            AMBIENTE="development";
+            AMBIENTE="dev";
           fi
         - echo $AMBIENTE
         #generar el compilado segun el ambiente
@@ -26,24 +26,24 @@ pipelines:
         #generar la imagen, teniendo como version el numero de compilado del bitbucket
         - docker build -t gcr.io/<project-id>/<image-name>:$BITBUCKET_BUILD_NUMBER .
         #autenticar contra el contenedor de imagenes de gcloud
-        - docker login -u _json_key -p <service-account> https://gcr.io
+        - docker login -u _json_key -p "$MY-SERVICE-ACCOUNT" https://gcr.io
         #subir la imagen generada al contenedor de imágenes de gcloud
         - docker push gcr.io/<project-id>/<image-name>:$BITBUCKET_BUILD_NUMBER
     - step:
         image: google/cloud-sdk:279.0.0
         script:
-        #obtener el cluster de despliegue a traves del comentario del commit, este debe contener [ambiente_<development-qc>]
+        #obtener el cluster de despliegue a traves del comentario del commit, este debe contener [ambiente_<dev-qc>]
         - COMMIT_MESSAGE=`git log --format=%B -n 1 $BITBUCKET_COMMIT`
-        - if [[ $COMMIT_MESSAGE =~ "[ambiente_development]" ]];
-            then CLUSTER="my-cluster-development";
+        - if [[ $COMMIT_MESSAGE =~ "[ambiente_dev]" ]];
+            then CLUSTER="my-cluster-dev";
           elif [[ $COMMIT_MESSAGE =~ "[ambiente_qc]" ]];
             then CLUSTER="my-cluster-qc";
           else
-            CLUSTER="my-cluster-development";
+            CLUSTER="my-cluster-dev";
           fi
         - echo $CLUSTER
-        #autenticar contra gcloud, mediante el archivo KEY-AUTH.json
-        - gcloud auth activate-service-account --key-file KEY-AUTH.json
+        #autenticar contra gcloud, mediante el archivo MY-KEY-AUTH.json
+        - gcloud auth activate-service-account --key-file MY-KEY-AUTH.json
         #situar el cluster
         - gcloud container clusters get-credentials $CLUSTER --zone us-central1-a --project <project-id>
         #colocar como version de la imagen el numero de compilado, esto sobre el archivo ARCHIVO-DEPLOY.yml
@@ -69,13 +69,13 @@ pipelines:
         image: maven:3.3.9
         script:
         - echo $BITBUCKET_TAG
-        #generar el compilado para un ambiente por defecto, en este caso development,
+        #generar el compilado para un ambiente por defecto, en este caso dev,
         #este valor posteriormente sera cambiado mediante el archivo yml
-        - mvn -B clean install -P <development>
+        - mvn -B clean install -P <dev>
         #generar la imagen teniendo como version el nombre del tag
         - docker build -t gcr.io/<project-id>/<image-name>:$BITBUCKET_TAG .
         #autenticar contra el contenedor de imagenes de gcloud
-        - docker login -u _json_key -p <sevice-account> https://gcr.io
+        - docker login -u _json_key -p "$MY-SERVICE-ACCOUNT" https://gcr.io
         #subir la imagen con el nombre del tag al contenedor de imagenes de gcloud
         - docker push gcr.io/<project-id>/<image-name>:$BITBUCKET_TAG
 
