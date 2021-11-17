@@ -1,0 +1,96 @@
+#los valores que se encuentran dentro de <> deben ser reemplazados, al ser reemplazados se debe eliminar los <>, 
+#de ser muy amplia alguna cadena, considerar el uso de variables en bitbucket
+#considerar que las variables sin comillas ("") son propias de bitbucket y las con comillas son creadas por nosotros dentro de bitbucket
+options:
+  docker: true
+############################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################
+pipelines:
+  branches:
+    feature/*:
+      - step:
+          name: Construir imagen y Subir al registry
+          services:
+            - node
+          caches:
+            - node
+          image: node:10.13.0
+          script:
+            #instalar angular-cli
+            - npm install -g @angular/cli@7.0.4
+            #instalar dependencias
+            - npm install
+            #generar el compilado segun el ambiente
+            - node --max_old_space_size=2048 ./node_modules/@angular/cli/bin/ng build --env="$AMBIENTE" --aot=false --vendor-chunk=true --common-chunk --delete-output-path=true --buildOptimizer=false --sourcemaps=false --outputHashing=all
+            #colocar la nueva version de la web, esto en el archivo de configuracion que lee angular
+            - sed -i s/versionValue/"$VERSION"/g dist/assets/configuracion.json
+            #generar la imagen
+            - docker build -t gcr.io/<project-id>/<image-name>:$BITBUCKET_BUILD_NUMBER .
+            #autenticar contra el contenedor de imagenes de gcloud
+            - docker login -u _json_key -p "$MY-SERVICE-ACCOUNT" https://gcr.io
+            #subir la imagen generada al contenedor de imagenes de gcloud
+            - docker push gcr.io/<project-id>/<image-name>:$BITBUCKET_BUILD_NUMBER
+      - step:
+          name: Deployar proyecto
+          image: google/cloud-sdk
+          script:
+            #autenticar contra gcloud
+            - gcloud auth activate-service-account --key-file MY-KEY-AUTH.json
+            #situar el cluster segun ambiente
+            - gcloud container clusters get-credentials $CLUSTER --zone us-central1-a --project <project-id>
+            #colocar como version de la imagen el numero de compilado, esto en el archivo yml
+            - sed -i s/versionImagen/$BITBUCKET_BUILD_NUMBER/g ARCHIVO-DEPLOY.yml
+            #mensaje por defecto deployment eliminado
+            - MENSAJE_ELIMINAR="deployment eliminado"
+            #validar eliminar deployment, para eliminar debe contener [-d]
+            - if [[ $COMMIT_MESSAGE =~ "[-d]" ]];
+                then kubectl delete deployments/<deployment-name>;
+              else
+                MENSAJE_ELIMINAR="deployment no eliminado";
+              fi
+            - echo $MENSAJE_ELIMINAR
+            #deployar la nueva imagen mediante el archivo yml
+            - kubectl apply -f ARCHIVO-DEPLOY.yml
+      - step:
+          name: Notificar proceso exitoso
+          script:
+            #obtener el autor del commit
+            - COMMIT_AUTHOR=`git log --format=%an -n 1 $BITBUCKET_COMMIT`
+            #obtener el email del autor del commit
+            - COMMIT_EMAIL_AUTHOR=`git log --format=%ae -n 1 $BITBUCKET_COMMIT`
+            #obtener el mensaje del commit
+            - COMMIT_MESSAGE=`git log --format=%B -n 1 $BITBUCKET_COMMIT`
+            #obtener el commit recortado
+            - COMMIT_COMMIT_RECORTADO=${BITBUCKET_COMMIT:0:7}
+            #armar el asunto
+            - ASUNTO="[Bitbucket] Pipeline for ${BITBUCKET_REPO_SLUG} success on ${COMMIT_COMMIT_RECORTADO} (${COMMIT_AUTHOR}/${BITBUCKET_REPO_FULL_NAME})"
+            #armar la url del pipeline
+            - URL_PIPELINE="https://bitbucket.org/${BITBUCKET_REPO_FULL_NAME}/addon/pipelines/home#!/results/${BITBUCKET_BUILD_NUMBER}"
+            #notificar el éxito del pipeline
+            - curl -H "origen:1" -H "Content-Type:application/json" --data "{\"para\":\"$COMMIT_EMAIL_AUTHOR\",\"asunto\":\"$ASUNTO\",\"cuerpo\":\"{\\\"cabecera\\\":\\\"$COMMIT_AUTHOR/$BITBUCKET_REPO_FULL_NAME\\\",\\\"rama\\\":\\\"$BITBUCKET_BRANCH\\\",\\\"usuario\\\":\\\"$COMMIT_AUTHOR\\\",\\\"commit\\\":\\\"$COMMIT_COMMIT_RECORTADO\\\",\\\"mensaje\\\":\\\"$COMMIT_MESSAGE\\\",\\\"urlPipeline\\\":\\\"$URL_PIPELINE\\\"}\"}" http://my-service-email
+############################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################
+    master:
+      - step:
+          name: Generar tag en Bitbucket
+          script:
+            - git tag "$TAG_VERSION"
+            - git push origin "$TAG_VERSION"
+      - step:
+          name: Construir imagen y Subir al registry (Producción)
+      - step:
+          name: Construir imagen y Subir al registry (PreProducción)
+          ...
+      - step:
+          name: Deployar proyecto (PreProducción)
+          ...
+      - step:
+          name: Notificar proceso exitoso
+          ...
+############################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################
+#manejo de cache para caches: node
+definitions:
+  services:
+    node:
+      image: node:10.13.0
+      memory: 1024
+      caches:
+        - node
